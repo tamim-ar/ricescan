@@ -1,0 +1,21 @@
+{
+  "settings_version": "0.0.6",
+  "datasets_dir": "C:\\Users\\tamim\\Desktop\\smut\\datasets",
+  "weights_dir": "weights",
+  "runs_dir": "runs",
+  "uuid": "68d1d09b990832636f8ae457ad1173bbb5e3c8541fcf5e67c8daf59f9771d331",
+  "sync": true,
+  "api_key": "",
+  "openai_api_key": "",
+  "clearml": true,
+  "comet": true,
+  "dvc": true,
+  "hub": true,
+  "mlflow": true,
+  "neptune": true,
+  "raytune": true,
+  "tensorboard": false,
+  "wandb": false,
+  "vscode_msg": true,
+  "openvino_msg": true
+}
