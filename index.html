@@ -251,6 +251,20 @@ header {
   padding: 20px;
 }
 
+.trial-note {
+  margin-bottom: 14px;
+  padding: 9px 12px;
+  border: 1px solid rgba(234,179,8,0.35);
+  border-radius: 8px;
+  background: rgba(234,179,8,0.08);
+  color: var(--yellow);
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.6px;
+  line-height: 1.5;
+  text-transform: uppercase;
+}
+
 /* ── UPLOAD ZONE ── */
 .upload-zone {
   border: 2px dashed var(--border2);
@@ -800,6 +814,7 @@ footer {
         <span class="panel-title" data-i18n="uploadTitle">Image Upload</span>
       </div>
       <div class="panel-body">
+        <div class="trial-note" data-i18n="trialNotice">This website is in trial mode. Sometimes it may not work.</div>
 
         <div class="upload-zone" id="uploadZone">
           <span class="upload-icon">🌾</span>
@@ -924,6 +939,7 @@ const TEXT = {
     heroTitle: 'Detect <em>Rice False Smut</em><br>in Seconds',
     heroDesc: 'Upload a field image. The trained YOLO model identifies infection stages - from initial to critical - and provides actionable recommendations.',
     uploadTitle: 'Image Upload',
+    trialNotice: 'This website is in trial mode. Sometimes it may not work.',
     dropTitle: 'Drop your image here',
     dropHelp: 'JPG, PNG, WEBP - max 16 MB',
     openCamera: 'Open Camera',
