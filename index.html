@@ -300,7 +300,84 @@ header {
   font-family: var(--mono);
 }
 
-#fileInput { display: none; }
+#fileInput,
+#cameraCaptureInput { display: none; }
+
+.input-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.secondary-btn {
+  min-height: 42px;
+  padding: 10px 12px;
+  background: var(--surface2);
+  border: 1px solid var(--border2);
+  border-radius: 8px;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-family: var(--sans);
+  font-size: 13px;
+  font-weight: 600;
+  transition: all 0.2s;
+}
+
+.secondary-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.secondary-btn.active {
+  background: var(--accent-dim);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.camera-panel {
+  display: none;
+  margin-top: 16px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--surface2);
+}
+
+.camera-panel.active { display: block; }
+
+.camera-frame {
+  position: relative;
+  background: #050805;
+}
+
+#cameraVideo,
+#cameraCanvas {
+  width: 100%;
+  height: 260px;
+  object-fit: cover;
+  display: block;
+}
+
+#cameraCanvas {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.camera-status {
+  padding: 9px 12px;
+  border-top: 1px solid var(--border);
+  color: var(--text-muted);
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+
+@media (max-width: 480px) {
+  .input-actions { grid-template-columns: 1fr; }
+}
 
 /* ── PREVIEW ── */
 #imagePreview {
@@ -729,6 +806,20 @@ footer {
           <h3 data-i18n="dropTitle">Drop your image here</h3>
           <p data-i18n="dropHelp">JPG, PNG, WEBP - max 16 MB</p>
           <input type="file" id="fileInput" accept="image/*">
+          <input type="file" id="cameraCaptureInput" accept="image/*" capture="environment">
+        </div>
+
+        <div class="input-actions">
+          <button class="secondary-btn" id="cameraBtn" type="button" data-i18n="openCamera">Open Camera</button>
+          <button class="secondary-btn" id="liveBtn" type="button" data-i18n="startLive">Start Live</button>
+        </div>
+
+        <div class="camera-panel" id="cameraPanel">
+          <div class="camera-frame">
+            <video id="cameraVideo" autoplay muted playsinline></video>
+            <canvas id="cameraCanvas"></canvas>
+          </div>
+          <div class="camera-status" id="cameraStatus" data-i18n="cameraIdle">Camera ready</div>
         </div>
 
         <div id="imagePreview">
@@ -798,6 +889,7 @@ footer {
 <script>
 const uploadZone = document.getElementById('uploadZone');
 const fileInput = document.getElementById('fileInput');
+const cameraCaptureInput = document.getElementById('cameraCaptureInput');
 const analyzeBtn = document.getElementById('analyzeBtn');
 const btnSpinner = document.getElementById('btnSpinner');
 const btnText = document.getElementById('btnText');
@@ -809,12 +901,21 @@ const resultCount = document.getElementById('resultCount');
 const loadingOverlay = document.getElementById('loadingOverlay');
 const themeToggle = document.getElementById('themeToggle');
 const langToggle = document.getElementById('langToggle');
-const API_BASE = window.location.port === '5000' ? '' : 'http://127.0.0.1:5000';
+const cameraBtn = document.getElementById('cameraBtn');
+const liveBtn = document.getElementById('liveBtn');
+const cameraPanel = document.getElementById('cameraPanel');
+const cameraVideo = document.getElementById('cameraVideo');
+const cameraCanvas = document.getElementById('cameraCanvas');
+const cameraStatus = document.getElementById('cameraStatus');
+const API_BASE = '';
 
 let selectedFile = null;
 let currentTheme = localStorage.getItem('ricescan-theme') || 'dark';
 let currentLang = localStorage.getItem('ricescan-lang') || 'en';
 let lastResults = null;
+let cameraStream = null;
+let liveTimer = null;
+let liveBusy = false;
 
 const TEXT = {
   en: {
@@ -825,6 +926,16 @@ const TEXT = {
     uploadTitle: 'Image Upload',
     dropTitle: 'Drop your image here',
     dropHelp: 'JPG, PNG, WEBP - max 16 MB',
+    openCamera: 'Open Camera',
+    startLive: 'Start Live',
+    stopLive: 'End Live',
+    cameraIdle: 'Camera ready',
+    cameraStarting: 'Opening camera...',
+    cameraLive: 'Live detection running',
+    cameraDenied: 'Camera access failed. Allow camera permission and use HTTPS.',
+    liveHttpsRequired: 'Live camera is blocked because this page is not trusted as HTTPS.',
+    liveAnalyzing: 'Scanning live frame...',
+    liveFrame: 'Live camera frame',
     analyze: 'Analyze Image',
     analyzing: 'Analyzing...',
     resultsTitle: 'Detection Results',
@@ -980,6 +1091,7 @@ function applyLanguage(lang) {
   }
   if (lastResults) renderResults(lastResults);
   else btnText.textContent = t('analyze');
+  updateCameraUi();
 }
 
 themeToggle.addEventListener('click', () => {
@@ -992,6 +1104,223 @@ langToggle.addEventListener('click', () => {
 
 applyTheme(currentTheme);
 applyLanguage(currentLang);
+
+function updateCameraUi() {
+  const hasCamera = Boolean(cameraStream);
+  const isLive = Boolean(liveTimer);
+
+  cameraPanel.classList.toggle('active', hasCamera);
+  liveBtn.classList.toggle('active', isLive);
+  liveBtn.disabled = false;
+  liveBtn.title = hasCamera ? '' : liveAccessMessage();
+  cameraBtn.textContent = t('openCamera');
+  liveBtn.textContent = isLive ? t('stopLive') : t('startLive');
+  if (hasCamera && !isLive) cameraStatus.textContent = t('cameraIdle');
+}
+
+function liveAccessMessage() {
+  const httpsUrl = `https://${window.location.hostname || 'YOUR_COMPUTER_IP'}:5443/`;
+  if (window.location.protocol !== 'https:') {
+    return `${t('liveHttpsRequired')} Open ${httpsUrl}`;
+  }
+  return `${t('liveHttpsRequired')} Accept/trust this local certificate, then reload ${window.location.href}`;
+}
+
+function canUseLiveCamera() {
+  const localHostnames = ['localhost', '127.0.0.1', '::1'];
+  return Boolean(
+    (window.isSecureContext || localHostnames.includes(window.location.hostname)) &&
+    navigator.mediaDevices &&
+    navigator.mediaDevices.getUserMedia
+  );
+}
+
+async function startCamera() {
+  if (!canUseLiveCamera()) {
+    showError(liveAccessMessage());
+    return;
+  }
+
+  cameraPanel.classList.add('active');
+  cameraStatus.textContent = t('cameraStarting');
+  try {
+    cameraStream = await navigator.mediaDevices.getUserMedia({
+      video: {
+        facingMode: { ideal: 'environment' },
+        width: { ideal: 1280 },
+        height: { ideal: 720 }
+      },
+      audio: false
+    });
+    cameraVideo.srcObject = cameraStream;
+    await cameraVideo.play().catch(() => {});
+    imagePreview.style.display = 'none';
+    updateCameraUi();
+  } catch (err) {
+    cameraStream = null;
+    updateCameraUi();
+    showError(`${t('cameraDenied')} ${err.message}`);
+  }
+}
+
+function stopCamera() {
+  stopLiveDetection();
+  if (cameraStream) {
+    cameraStream.getTracks().forEach(track => track.stop());
+  }
+  cameraStream = null;
+  cameraVideo.srcObject = null;
+  clearCameraCanvas();
+  updateCameraUi();
+}
+
+function clearCameraCanvas() {
+  const ctx = cameraCanvas.getContext('2d');
+  ctx.clearRect(0, 0, cameraCanvas.width, cameraCanvas.height);
+}
+
+function cameraFrameToFile() {
+  return new Promise(resolve => {
+    const width = cameraVideo.videoWidth || 1280;
+    const height = cameraVideo.videoHeight || 720;
+    if (!width || !height) {
+      resolve(null);
+      return;
+    }
+
+    const frameCanvas = document.createElement('canvas');
+    frameCanvas.width = width;
+    frameCanvas.height = height;
+    frameCanvas.getContext('2d').drawImage(cameraVideo, 0, 0, width, height);
+    frameCanvas.toBlob(blob => {
+      if (!blob) {
+        resolve(null);
+        return;
+      }
+      resolve(new File([blob], `camera-${Date.now()}.jpg`, { type: 'image/jpeg' }));
+    }, 'image/jpeg', 0.86);
+  });
+}
+
+function drawCameraDetections(data) {
+  const ctx = cameraCanvas.getContext('2d');
+  const sourceWidth = cameraVideo.videoWidth || 1;
+  const sourceHeight = cameraVideo.videoHeight || 1;
+  cameraCanvas.width = sourceWidth;
+  cameraCanvas.height = sourceHeight;
+  ctx.clearRect(0, 0, sourceWidth, sourceHeight);
+  ctx.lineWidth = Math.max(3, Math.round(sourceWidth / 250));
+  ctx.font = `${Math.max(14, Math.round(sourceWidth / 45))}px DM Sans, Arial, sans-serif`;
+  ctx.textBaseline = 'top';
+
+  (data.detections || []).forEach(d => {
+    const [x1, y1, x2, y2] = d.bbox;
+    const color = COLORS[d.class] || '#4ade80';
+    const info = stageInfo(d.class, d.info || {});
+    const label = `${info.label || d.class} ${Math.round(d.confidence * 100)}%`;
+    const width = Math.max(1, x2 - x1);
+    const height = Math.max(1, y2 - y1);
+
+    ctx.strokeStyle = color;
+    ctx.fillStyle = color;
+    ctx.strokeRect(x1, y1, width, height);
+
+    const metrics = ctx.measureText(label);
+    const labelHeight = Math.max(22, Math.round(sourceWidth / 32));
+    const labelY = y1 - labelHeight >= 0 ? y1 - labelHeight : y1;
+    ctx.fillRect(x1, labelY, metrics.width + 12, labelHeight);
+    ctx.fillStyle = '#0a0e0a';
+    ctx.fillText(label, x1 + 6, labelY + 4);
+  });
+}
+
+async function analyzeImageFile(file, options = {}) {
+  if (!file) return null;
+  const isLive = options.live === true;
+
+  if (!isLive) {
+    analyzeBtn.disabled = true;
+    btnSpinner.style.display = 'block';
+    btnText.textContent = t('analyzing');
+    loadingOverlay.classList.add('active');
+  } else {
+    cameraStatus.textContent = t('liveAnalyzing');
+  }
+
+  const formData = new FormData();
+  formData.append('image', file);
+
+  try {
+    const res = await fetch(`${API_BASE}/analyze`, { method: 'POST', body: formData });
+    const data = await res.json();
+
+    if (res.ok && data.success) {
+      lastResults = data;
+      renderResults(data);
+      if (isLive) {
+        drawCameraDetections(data);
+        cameraStatus.textContent = `${t('cameraLive')} - ${data.detections.length} ${t('detections')}`;
+      }
+      return data;
+    }
+
+    showError(data.error || t('analysisFailed'));
+  } catch (err) {
+    showError(`${t('serverError')}: ${err.message}`);
+  } finally {
+    if (!isLive) {
+      analyzeBtn.disabled = false;
+      btnSpinner.style.display = 'none';
+      btnText.textContent = t('analyze');
+      loadingOverlay.classList.remove('active');
+    }
+  }
+
+  return null;
+}
+
+async function scanLiveFrame() {
+  if (!cameraStream || liveBusy) return;
+  liveBusy = true;
+  const file = await cameraFrameToFile();
+  await analyzeImageFile(file, { live: true });
+  liveBusy = false;
+}
+
+function startLiveDetection() {
+  if (!cameraStream) return;
+  clearCameraCanvas();
+  cameraStatus.textContent = t('cameraLive');
+  scanLiveFrame();
+  liveTimer = window.setInterval(scanLiveFrame, 1800);
+  updateCameraUi();
+}
+
+function stopLiveDetection() {
+  if (liveTimer) window.clearInterval(liveTimer);
+  liveTimer = null;
+  liveBusy = false;
+  updateCameraUi();
+}
+
+cameraBtn.addEventListener('click', () => {
+  if (cameraStream) stopCamera();
+  cameraCaptureInput.value = '';
+  cameraCaptureInput.click();
+});
+
+liveBtn.addEventListener('click', async () => {
+  if (liveTimer) {
+    stopCamera();
+    return;
+  }
+
+  if (!cameraStream) await startCamera();
+  if (cameraStream) startLiveDetection();
+});
+
+fileInput.addEventListener('click', e => e.stopPropagation());
+cameraCaptureInput.addEventListener('click', e => e.stopPropagation());
 
 // Upload zone click
 uploadZone.addEventListener('click', () => fileInput.click());
@@ -1010,7 +1339,15 @@ fileInput.addEventListener('change', e => {
   if (e.target.files[0]) handleFile(e.target.files[0]);
 });
 
+cameraCaptureInput.addEventListener('change', async e => {
+  const file = e.target.files[0];
+  if (!file) return;
+  handleFile(file);
+  await analyzeImageFile(file);
+});
+
 function handleFile(file) {
+  if (cameraStream) stopCamera();
   selectedFile = file;
   const url = URL.createObjectURL(file);
   previewImg.src = url;
@@ -1026,33 +1363,7 @@ function handleFile(file) {
 // Analyze
 analyzeBtn.addEventListener('click', async () => {
   if (!selectedFile) return;
-
-  analyzeBtn.disabled = true;
-  btnSpinner.style.display = 'block';
-  btnText.textContent = t('analyzing');
-  loadingOverlay.classList.add('active');
-
-  const formData = new FormData();
-  formData.append('image', selectedFile);
-
-  try {
-    const res = await fetch(`${API_BASE}/analyze`, { method: 'POST', body: formData });
-    const data = await res.json();
-
-    if (res.ok && data.success) {
-      lastResults = data;
-      renderResults(data);
-    } else {
-      showError(data.error || t('analysisFailed'));
-    }
-  } catch (err) {
-    showError(`${t('serverError')}: ${err.message}`);
-  } finally {
-    analyzeBtn.disabled = false;
-    btnSpinner.style.display = 'none';
-    btnText.textContent = t('analyze');
-    loadingOverlay.classList.remove('active');
-  }
+  await analyzeImageFile(selectedFile);
 });
 
 const COLORS = {

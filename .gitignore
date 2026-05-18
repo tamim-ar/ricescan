@@ -1,0 +1,4 @@
+ssl/
+static/uploads/
+__pycache__/
+.ultralytics/

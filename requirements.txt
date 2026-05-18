@@ -2,3 +2,4 @@ Flask>=3.0.0
 ultralytics>=8.0.0
 opencv-python>=4.6.0
 Pillow>=7.1.2
+cryptography>=42.0.0
